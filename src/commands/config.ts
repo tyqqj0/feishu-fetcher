@@ -1,17 +1,13 @@
-import { createInterface } from 'node:readline/promises';
-import { stdin, stderr } from 'node:process';
+import { text, isCancel } from '@clack/prompts';
+import { stderr } from 'node:process';
 import { Command } from 'commander';
 import { addApp, loadConfig, removeApp } from '../lib/config-store.js';
 import { getTenantAccessToken, getAppName } from '../lib/feishu-client.js';
 
-async function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input: stdin, output: stderr });
-  try {
-    const answer = await rl.question(question);
-    return answer.trim();
-  } finally {
-    rl.close();
-  }
+async function ask(message: string, placeholder?: string): Promise<string> {
+  const result = await text({ message, placeholder });
+  if (isCancel(result)) process.exit(0);
+  return (result as string).trim();
 }
 
 export function registerConfigCommand(program: Command) {
@@ -27,11 +23,8 @@ export function registerConfigCommand(program: Command) {
       let { name, appId, appSecret } = opts;
 
       // Step 1: Collect credentials
-      if (!appId || !appSecret) {
-        stderr.write('Interactive mode — enter app credentials:\n');
-        if (!appId) appId = await prompt('App ID: ');
-        if (!appSecret) appSecret = await prompt('App Secret: ');
-      }
+      if (!appId) appId = await ask('App ID', 'cli_xxxx');
+      if (!appSecret) appSecret = await ask('App Secret');
 
       if (!appId || !appSecret) {
         stderr.write('Error: App ID and App Secret are required.\n');
@@ -53,17 +46,13 @@ export function registerConfigCommand(program: Command) {
       try {
         fetchedName = await getAppName(token);
       } catch {
-        // Non-fatal — app info API might require extra permissions
+        // Non-fatal
       }
 
       // Step 3: Determine final name
       if (!name) {
-        if (fetchedName) {
-          const input = await prompt(`App name [${fetchedName}]: `);
-          name = input || fetchedName;
-        } else {
-          name = await prompt('App name (e.g. prod, test): ');
-        }
+        name = await ask('App name', fetchedName || 'prod');
+        if (!name && fetchedName) name = fetchedName;
       }
 
       if (!name) {

@@ -22,6 +22,12 @@ export interface Department {
   open_department_id: string;
 }
 
+export interface DeptNode {
+  id: string;
+  name: string;
+  children: DeptNode[];
+}
+
 export interface FetchOptions {
   app?: string;
   format: 'csv' | 'json';

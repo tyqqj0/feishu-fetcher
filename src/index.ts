@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { registerConfigCommand } from './commands/config.js';
 import { registerFetchCommand } from './commands/fetch.js';
+import { registerDeptCommand } from './commands/dept.js';
 
 const program = new Command();
 
@@ -11,5 +12,6 @@ program
 
 registerConfigCommand(program);
 registerFetchCommand(program);
+registerDeptCommand(program);
 
 program.parse();

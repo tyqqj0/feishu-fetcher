@@ -1,6 +1,34 @@
 import { stderr } from 'node:process';
 import { getChildDepartments, getUsersByDepartment } from './feishu-client.js';
-import type { FeishuUser } from '../types.js';
+import type { DeptNode, FeishuUser } from '../types.js';
+
+export async function buildDeptTree(token: string, rootId: string = '0'): Promise<DeptNode[]> {
+  const roots: DeptNode[] = [];
+
+  interface QueueItem { parentChildren: DeptNode[]; deptId: string }
+  const queue: QueueItem[] = [{ parentChildren: roots, deptId: rootId }];
+
+  while (queue.length > 0) {
+    const { parentChildren, deptId } = queue.shift()!;
+
+    let pageToken: string | undefined;
+    do {
+      const result = await getChildDepartments(token, deptId, pageToken);
+      for (const child of result.items) {
+        const node: DeptNode = {
+          id: child.open_department_id,
+          name: child.name || child.open_department_id,
+          children: [],
+        };
+        parentChildren.push(node);
+        queue.push({ parentChildren: node.children, deptId: child.open_department_id });
+      }
+      pageToken = result.hasMore ? result.pageToken : undefined;
+    } while (pageToken);
+  }
+
+  return roots;
+}
 
 export async function traverseAndCollect(
   token: string,

@@ -1,9 +1,11 @@
-import { stderr } from 'node:process';
+import { stderr, stdin } from 'node:process';
 import { Command } from 'commander';
 import { getApp } from '../lib/config-store.js';
 import { getTenantAccessToken } from '../lib/feishu-client.js';
-import { traverseAndCollect } from '../lib/traverser.js';
+import { traverseAndCollect, buildDeptTree } from '../lib/traverser.js';
 import { formatCsv, formatJson, writeOutput } from '../lib/formatter.js';
+import { selectDepartments } from '../lib/dept-tree.js';
+import type { DeptNode, FeishuUser } from '../types.js';
 
 export function registerFetchCommand(program: Command) {
   program
@@ -12,7 +14,7 @@ export function registerFetchCommand(program: Command) {
     .option('--app <name>', 'App name to use (default: first configured app)')
     .option('--format <fmt>', 'Output format: csv or json', 'csv')
     .option('--output <file>', 'Output file path (default: stdout)')
-    .option('--department <id>', 'Start from a specific department (default: root)')
+    .option('--department <id>', 'Fetch from a specific department directly (skip interactive)')
     .action(async (opts) => {
       const format = opts.format as 'csv' | 'json';
       if (format !== 'csv' && format !== 'json') {
@@ -39,16 +41,36 @@ export function registerFetchCommand(program: Command) {
         process.exit(1);
       }
 
+      let targetDepts: string[];
+
+      if (opts.department) {
+        // Non-interactive: use specified department directly
+        targetDepts = [opts.department];
+      } else if (stdin.isTTY) {
+        // Interactive: show tree and let user choose
+        targetDepts = await interactiveSelect(token);
+      } else {
+        // Piped/non-TTY: default to root
+        targetDepts = ['0'];
+      }
+
       stderr.write('Traversing departments and collecting users...\n');
 
-      const rootDept = opts.department || '0';
-      let users;
-      try {
-        users = await traverseAndCollect(token, rootDept);
-      } catch (e: any) {
-        stderr.write(`Error during traversal: ${e.message}\n`);
-        process.exit(1);
+      const allUsers = new Map<string, FeishuUser>();
+      for (const deptId of targetDepts) {
+        try {
+          const users = await traverseAndCollect(token, deptId);
+          for (const u of users) {
+            if (!allUsers.has(u.open_id)) {
+              allUsers.set(u.open_id, u);
+            }
+          }
+        } catch (e: any) {
+          stderr.write(`\n  Warning: Skipped department ${deptId} — ${e.message}\n`);
+        }
       }
+
+      const users = Array.from(allUsers.values());
 
       if (users.length === 0) {
         stderr.write('Warning: No users found. Check app contact permission scope.\n');
@@ -64,4 +86,29 @@ export function registerFetchCommand(program: Command) {
         stderr.write(`Output written to: ${opts.output}\n`);
       }
     });
+}
+
+async function interactiveSelect(token: string): Promise<string[]> {
+  stderr.write('Fetching department tree...\n');
+
+  let tree: DeptNode[];
+  try {
+    tree = await buildDeptTree(token, '0');
+  } catch (e: any) {
+    stderr.write(`Warning: Cannot fetch department tree — ${e.message}\n`);
+    stderr.write('Falling back to root department.\n');
+    return ['0'];
+  }
+
+  if (tree.length === 0) {
+    stderr.write('No sub-departments found. Using root department.\n');
+    return ['0'];
+  }
+
+  // Add a virtual "all (root)" option
+  const rootNode: DeptNode = { id: '0', name: '全部 (root)', children: [] };
+  const treeWithRoot = [rootNode, ...tree];
+
+  const selected = await selectDepartments(treeWithRoot);
+  return selected.map(n => n.id);
 }
