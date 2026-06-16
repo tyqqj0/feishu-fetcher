@@ -84,6 +84,14 @@ export interface PageResult<T> {
   pageToken?: string;
 }
 
+export async function getAppName(token: string): Promise<string> {
+  const res = await request('/open-apis/application/v6/applications/me', {
+    token,
+    params: { lang: 'zh_cn' },
+  });
+  return res.data?.app?.app_name || '';
+}
+
 export async function getChildDepartments(
   token: string,
   departmentId: string,
